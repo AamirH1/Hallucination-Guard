@@ -69,7 +69,13 @@ class MockLLMProvider:
         return json.dumps(payload)
 
     def _answer_generation(self, query: str, evidence: list[dict], excluded_claims: list[str]) -> str:
-        usable = [e for e in evidence if e.get("supporting_text") and e.get("claim") not in excluded_claims]
+        usable = [
+            e
+            for e in evidence
+            if e.get("supporting_text")
+            and e.get("claim") not in excluded_claims
+            and not any(e["supporting_text"].strip().rstrip(".") in excluded for excluded in excluded_claims)
+        ]
         if not usable:
             return "I do not have sufficient evidence in the retrieved sources to answer this question reliably."
         sentences = []

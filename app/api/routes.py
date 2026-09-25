@@ -68,6 +68,8 @@ async def query(
         clarification_required=result.clarification_required,
         trace_id=result.trace_id,
         regeneration_attempts=result.regeneration_attempts,
+        conflicts_detected=result.conflicts_detected,
+        conflict_details=result.conflict_details,
     )
 
 

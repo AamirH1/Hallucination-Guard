@@ -69,3 +69,16 @@ async def test_revise_loop_drops_unsupported_claim_and_converges():
     assert fake_llm.calls >= 2  # confirms at least one regeneration happened
     assert result.regeneration_attempts >= 1
     assert result.governance_decision in (GovernanceDecision.APPROVE, GovernanceDecision.REFUSE)
+
+
+@pytest.mark.asyncio
+async def test_conflicting_refund_sources_are_surfaced_not_silently_answered():
+    orchestrator = Orchestrator(MemoryStateStore())
+    result = await orchestrator.handle_query(
+        "What is the refund window for Starter plan customers?", "session-conflict"
+    )
+    assert result.conflicts_detected is True
+    assert result.governance_decision == GovernanceDecision.REFUSE
+    assert "conflict" in result.answer.lower()
+    assert "refund_policy_enterprise" in result.answer and "refund_policy" in result.answer
+    assert "uptime" not in result.answer.lower()

@@ -121,21 +121,56 @@ breakdown.
 
 | Metric | Baseline | Framework |
 |---|---|---|
-| Faithfulness (embedding proxy) | 0.443 | 0.602 |
-| Retrieval precision / recall | n/a (no retrieval) | 0.263 / 0.947 |
-| Groundedness | n/a | 0.537 |
+| Faithfulness (embedding proxy) | 0.325 | 0.507 |
+| Retrieval precision / recall | n/a (no retrieval) | 0.646 / 0.825 |
+| Groundedness | n/a | 0.478 |
 | Hallucination rate (trap + conflicting categories) | 0.375 | 0.000 |
-| Refusal accuracy (insufficient_evidence) | 0.000 | 0.800 |
+| Refusal accuracy (insufficient_evidence) | 0.000 | 1.000 |
 
-Full per-category tables are in `evaluation/run_report.md`. The refusal accuracy of
-80% (4/5 insufficient_evidence cases correctly REFUSEd) rather than 100% reflects
-limitation #1 above.
+Full per-category tables are in `evaluation/run_report.md`.
+
+### Relevance and conflict fix (2026-09-25) - before and after
+
+A manual test showed an approved answer to "refund window for Starter plan" that
+dumped five loosely related documents. The cause was that evidence was kept by
+retrieval rank alone and grounding only checked support, not relevance. Changes:
+evidence passages must now share query terms that discriminate between the retrieved
+documents (a word found in nearly every document, such as the brand name, does not
+count); grounding scores each claim against the query and zeroes off-topic claims;
+number-based conflict detection now handles "30-day" style text and only compares
+passages about the same subject; conflicts are returned in the API and explained in
+the refusal text; REVISE now actually removes excluded sentences in the mock provider.
+
+| Metric (framework) | Before | After |
+|---|---|---|
+| Retrieval precision | 0.263 | 0.646 |
+| Retrieval recall | 0.947 | 0.825 |
+| Refusal accuracy | 0.800 | 1.000 |
+| Faithfulness (embedding proxy) | 0.602 | 0.507 |
+| Hallucination rate | 0.000 | 0.000 |
+
+Precision and refusal accuracy improved; recall fell because stricter filtering
+drops some passages that answered a multi-part question (for example the encryption
+question no longer finds `security_practices`). The baseline column also moved
+(faithfulness 0.443 to 0.325) because the oracle context used to score it depends on
+the same evidence filter, so baseline numbers are only comparable within one run.
+The overall faithfulness figure fell as more questions now correctly refuse, and
+refusals score near zero on that metric, so it should not be read on its own.
+
+Residual weakness: 2 of 5 hallucination-trap questions still get an approved,
+tangential answer. Measured claim-to-query similarity for those was 0.35 and 0.64
+versus 0.34 to 0.49 for correct answers, so no threshold on that signal separates
+them without rejecting good answers. The threshold was therefore left at 0.30 rather
+than tuned on the benchmark. The hallucination-rate metric cannot see this failure.
 
 ## Load test results (from an actual run — see `evaluation/load_test_report.md`)
 
-60s, 15 concurrent async workers, unique session per request (mock LLM provider):
-3,735 requests, 0% error rate, throughput ~62 req/s, p50 261.7ms, p95 308.0ms,
-p99 392.8ms. (An earlier run with workers hammering the same 15 sessions instead hit
+60s, 15 concurrent async workers, unique session per request (mock LLM provider),
+re-run after the fix above: 6,271 requests, 0% error rate, throughput ~104 req/s,
+p50 155.4ms, p95 179.4ms, p99 201.1ms. Throughput was higher than the earlier run
+(3,735 requests, p50 261.7ms); fewer passages per query is a likely cause but this
+was not isolated from machine load differences.
+(An earlier run with workers hammering the same 15 sessions instead hit
 the intentional per-session rate limiter, producing ~50% "errors" that were actually
 429s — a real security feature working as designed, not a bug; the final script
 distinguishes 429s from genuine errors.)

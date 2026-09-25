@@ -9,7 +9,7 @@
 ![ChromaDB](https://img.shields.io/badge/vector%20store-ChromaDB-orange)
 ![Redis](https://img.shields.io/badge/state-Redis-DC382D?logo=redis&logoColor=white)
 ![MCP](https://img.shields.io/badge/tools-Model%20Context%20Protocol-black)
-![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-55%20passing-brightgreen)
 
 </div>
 
@@ -86,7 +86,7 @@ The app is one FastAPI process that runs the agent pipeline in-process; Redis an
 
 | Command | What it does |
 |---|---|
-| `pytest tests/ -v` | Runs the unit, integration and security suites (49 tests) |
+| `pytest tests/ -v` | Runs the unit, integration and security suites (55 tests) |
 | `python scripts/seed_data.py` | Re-indexes `data/sample_docs` after you edit the corpus |
 | `python scripts/run_benchmark.py` | Runs the baseline vs framework benchmark, writes `evaluation/run_report.md` |
 | `python scripts/load_test.py` | Starts a local server, runs 60 s of load, writes `evaluation/load_test_report.md` |
@@ -98,8 +98,8 @@ All settings (provider, model, vector store, thresholds) are documented in [.env
 
 From the committed reports, using the offline mock provider and local embeddings:
 
-- **Benchmark (34 cases):** hallucination rate on trap and conflicting-evidence questions was 37.5% for the bare baseline and 0.0% with the framework. Refusal accuracy on unanswerable questions was 80%.
-- **Load test (60 s, 15 workers, 3,735 requests):** 0% errors, p50 262 ms, p95 308 ms, p99 393 ms.
+- **Benchmark (34 cases):** hallucination rate on trap and conflicting-evidence questions was 37.5% for the bare baseline and 0.0% with the framework. Refusal accuracy on unanswerable questions was 100% (5 of 5). Retrieval precision was 0.646 and recall 0.825.
+- **Load test (60 s, 15 workers, 6,271 requests):** 0% errors, p50 155 ms, p95 179 ms, p99 201 ms.
 
 These numbers do not show how a real LLM behaves. See the limitations below.
 
@@ -107,7 +107,9 @@ These numbers do not show how a real LLM behaves. See the limitations below.
 
 - **Grounding is a proxy.** Claims are scored by embedding similarity, not a trained entailment model, so a reversed or negated claim on the same topic can score as supported.
 - **Mock provider only was benchmarked.** The mock is extractive, so results do not cover a real model's creative failure modes.
-- **Answer relevancy fell** in the benchmark (0.644 to 0.344). The framework's short, citation-heavy answers score lower on the similarity proxy; this is unverified against human judgement.
+- **Some tangential answers still get approved.** 2 of the 5 hallucination-trap questions (for example "exactly how many customers does Nimbus have?") still return an approved answer built from a loosely related, correctly sourced sentence. The embedding relevance score cannot separate these from good answers, and the hallucination-rate metric does not catch them because it only checks that the answer is supported by sources.
+- **Conflicts can be scope differences.** The refund question is refused because a 30-day and a 14-day window are both found. That is probably a standard-versus-Enterprise difference, but the system only sees two different numbers on the same topic and reports them.
+- **Answer relevancy is below the baseline** (0.385 versus 0.644). The bare baseline restates the question's own words, which the similarity proxy rewards, so the comparison is not like for like.
 - **Not exercised live:** real LLM providers, Redis, Langfuse, Docker, and the Weaviate, Elasticsearch and Azure adapters. The code exists but has not been run against those services.
 - **Retrieval confidence** can be inflated on a small single-domain corpus when a query shares generic vocabulary with many documents.
 - **Known CVEs:** `pip-audit` reports four unpatched ChromaDB advisories (details in `evaluation/security_scan_report.txt`).

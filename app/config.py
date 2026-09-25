@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # Governance thresholds
     grounding_threshold: float = 0.85
     retrieval_threshold: float = 0.70
+    relevance_threshold: float = 0.30
     max_regeneration_attempts: int = 2
 
     # API

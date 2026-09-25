@@ -27,6 +27,8 @@ class PipelineResponse(BaseModel):
     clarification_required: bool
     trace_id: str
     regeneration_attempts: int
+    conflicts_detected: bool = False
+    conflict_details: list[str] = []
 
 
 class Orchestrator:
@@ -46,7 +48,7 @@ class Orchestrator:
         self.retrieval_agent = RetrievalAgent(self.state_store)
         self.evidence_agent = EvidenceAggregationAgent(self.settings.evidence_score_threshold)
         self.generation_agent = AnswerGenerationAgent(self.llm, self.settings.retrieval_threshold)
-        self.grounding_agent = GroundingAgent(self.embeddings)
+        self.grounding_agent = GroundingAgent(self.embeddings, relevance_threshold=self.settings.relevance_threshold)
         self.governance_agent = GovernanceAgent(
             self.settings.grounding_threshold,
             self.settings.retrieval_threshold,
@@ -99,16 +101,22 @@ class Orchestrator:
                     out["answer"] = generation.answer
 
                 if generation.insufficient_evidence:
+                    if evidence.conflicts_detected:
+                        generation.answer = (
+                            "The retrieved sources conflict, so I cannot give a single reliable answer. "
+                            + " ".join(evidence.conflict_details)
+                        )
                     outcome = self.governance_agent.decide(0.0, retrieval.retrieval_confidence, attempts, True, [])
                     final_answer, final_grounding, decision = generation.answer, None, outcome
                     break
 
                 async with trace.span("grounding", attempt=attempts) as out:
-                    grounding = await self.grounding_agent.run(generation.answer, evidence)
+                    grounding = await self.grounding_agent.run(generation.answer, evidence, query=query)
                     out["grounding_score"] = grounding.grounding_score
                     out["hallucination_detected"] = grounding.hallucination_detected
+                    out["off_topic_claims"] = len(grounding.off_topic_claims)
 
-                unsupported = [c.claim for c in grounding.claims if not c.supported]
+                unsupported = [c.claim for c in grounding.claims if not c.supported or not c.relevant]
                 outcome = self.governance_agent.decide(
                     grounding.grounding_score, retrieval.retrieval_confidence, attempts, False, unsupported
                 )
@@ -142,6 +150,9 @@ class Orchestrator:
                     "available evidence, even after revision. " + final_answer
                 )
 
+            if evidence.conflicts_detected and not generation.insufficient_evidence:
+                answer_text = "Note: the sources disagree. " + " ".join(evidence.conflict_details) + " " + answer_text
+
             return PipelineResponse(
                 answer=answer_text,
                 sources=[e.source_id for e in evidence.evidence],
@@ -151,4 +162,6 @@ class Orchestrator:
                 clarification_required=False,
                 trace_id=request_id,
                 regeneration_attempts=attempts,
+                conflicts_detected=evidence.conflicts_detected,
+                conflict_details=evidence.conflict_details,
             )

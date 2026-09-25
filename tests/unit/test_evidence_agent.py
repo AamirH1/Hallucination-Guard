@@ -37,3 +37,30 @@ async def test_empty_retrieval_yields_empty_evidence():
     package = await evidence_agent.run(RetrievalResult(query="x", items=[], retrieval_confidence=0.0))
     assert package.evidence == []
     assert package.overall_confidence == 0.0
+
+
+@pytest.mark.asyncio
+async def test_off_topic_passages_are_dropped():
+    retrieval = await RetrievalAgent(MemoryStateStore()).run(
+        "s1", "What specific stock ticker symbol does Nimbus trade under?"
+    )
+    package = await EvidenceAggregationAgent().run(retrieval)
+    assert package.evidence == []
+
+
+@pytest.mark.asyncio
+async def test_hyphenated_refund_windows_conflict_and_are_surfaced():
+    retrieval = await RetrievalAgent(MemoryStateStore()).run("s1", "What is the refund window for a Nimbus contract?")
+    package = await EvidenceAggregationAgent().run(retrieval)
+    assert package.conflicts_detected is True
+    joined = " ".join(package.conflict_details)
+    assert "refund_policy" in joined and "refund_policy_enterprise" in joined
+
+
+@pytest.mark.asyncio
+async def test_unrelated_numbers_in_different_topics_do_not_conflict():
+    retrieval = await RetrievalAgent(MemoryStateStore()).run(
+        "s1", "Within what timeframe must a SEV1 incident get a public status page update?"
+    )
+    package = await EvidenceAggregationAgent().run(retrieval)
+    assert package.conflicts_detected is False

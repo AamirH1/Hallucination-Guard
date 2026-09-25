@@ -20,6 +20,8 @@ class QueryResponse(BaseModel):
     clarification_required: bool
     trace_id: str
     regeneration_attempts: int
+    conflicts_detected: bool = False
+    conflict_details: list[str] = []
 
 
 class FeedbackRequest(BaseModel):

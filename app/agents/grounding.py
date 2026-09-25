@@ -24,12 +24,15 @@ class ClaimScore(BaseModel):
     max_similarity: float
     supported: bool
     best_source_id: str | None = None
+    query_relevance: float | None = None
+    relevant: bool = True
 
 
 class GroundingResult(BaseModel):
     claims: list[ClaimScore]
     grounding_score: float
     hallucination_detected: bool
+    off_topic_claims: list[str] = []
 
 
 def _split_claims(answer: str) -> list[str]:
@@ -53,40 +56,50 @@ class GroundingAgent(BaseAgent):
         embedding_provider: EmbeddingProvider,
         support_threshold: float = 0.55,
         llm_judge: LLMProvider | None = None,
+        relevance_threshold: float = 0.30,
     ) -> None:
         super().__init__()
         self.embedding_provider = embedding_provider
         self.support_threshold = support_threshold
+        self.relevance_threshold = relevance_threshold
         self.llm_judge = llm_judge  # optional, unused unless explicitly wired
 
-    async def run(self, answer: str, evidence: EvidencePackage) -> GroundingResult:
+    async def run(self, answer: str, evidence: EvidencePackage, query: str | None = None) -> GroundingResult:
         claims = _split_claims(answer)
         if not claims or not evidence.evidence:
             return GroundingResult(claims=[], grounding_score=0.0, hallucination_detected=True)
 
         passages = [e.supporting_text for e in evidence.evidence]
         source_ids = [e.source_id for e in evidence.evidence]
-        all_texts = claims + passages
+        all_texts = claims + passages + ([query] if query else [])
         embeddings = await self.embedding_provider.embed(all_texts)
         claim_vecs = embeddings[: len(claims)]
-        passage_vecs = embeddings[len(claims) :]
+        passage_vecs = embeddings[len(claims) : len(claims) + len(passages)]
+        query_vec = embeddings[-1] if query else None
 
         scores: list[ClaimScore] = []
         for claim, cvec in zip(claims, claim_vecs):
             sims = [_cosine(cvec, pvec) for pvec in passage_vecs]
             best_idx = int(np.argmax(sims)) if sims else -1
             best_sim = sims[best_idx] if sims else 0.0
+            relevance = _cosine(cvec, query_vec) if query_vec is not None else None
             scores.append(
                 ClaimScore(
                     claim=claim,
                     max_similarity=round(best_sim, 4),
                     supported=best_sim >= self.support_threshold,
                     best_source_id=source_ids[best_idx] if best_idx >= 0 else None,
+                    query_relevance=round(relevance, 4) if relevance is not None else None,
+                    relevant=relevance is None or relevance >= self.relevance_threshold,
                 )
             )
 
-        grounding_score = sum(s.max_similarity for s in scores) / len(scores)
+        # A sourced but off-topic claim contributes 0: support without relevance is not an answer.
+        grounding_score = sum(s.max_similarity if s.relevant else 0.0 for s in scores) / len(scores)
         hallucination_detected = any(not s.supported for s in scores)
         return GroundingResult(
-            claims=scores, grounding_score=round(grounding_score, 4), hallucination_detected=hallucination_detected
+            claims=scores,
+            grounding_score=round(grounding_score, 4),
+            hallucination_detected=hallucination_detected,
+            off_topic_claims=[s.claim for s in scores if not s.relevant],
         )
